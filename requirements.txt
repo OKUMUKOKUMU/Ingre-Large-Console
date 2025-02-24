@@ -408,7 +408,7 @@ zict==3.0.0
 zipp==3.17.0
 zope.interface==5.4.0
 zstandard==0.22.0
--ympy==1.13.1
+sympy==1.13.1
 pandas==2.2.2
 streamlit==1.32.0
 gspread==6.1.4
