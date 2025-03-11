@@ -9,17 +9,6 @@ import plotly.express as px
 import numpy as np
 from datetime import datetime, timedelta
 
-import pandas as pd
-import streamlit as st
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from dotenv import load_dotenv
-import os
-import time
-import plotly.express as px
-import numpy as np
-from datetime import datetime, timedelta
-
 # Load environment variables
 load_dotenv()
 
@@ -44,11 +33,25 @@ def connect_to_gsheet(spreadsheet_name, sheet_name):
              "https://www.googleapis.com/auth/drive.file", 
              "https://www.googleapis.com/auth/drive"]
     
+    # Load credentials from environment variables
+    required_env_vars = [
+        "GOOGLE_PROJECT_ID", "GOOGLE_PRIVATE_KEY_ID", "GOOGLE_PRIVATE_KEY",
+        "GOOGLE_CLIENT_EMAIL", "GOOGLE_CLIENT_ID", "GOOGLE_AUTH_URI", 
+        "GOOGLE_TOKEN_URI", "GOOGLE_AUTH_PROVIDER_X509_CERT_URL", "GOOGLE_CLIENT_X509_CERT_URL"
+    ]
+    
+    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+    
+    if missing_vars:
+        st.error(f"❌ Missing environment variables: {', '.join(missing_vars)}")
+        return None
+    
+    # Construct credentials dictionary safely
     credentials = {
         "type": "service_account",
         "project_id": os.getenv("GOOGLE_PROJECT_ID"),
         "private_key_id": os.getenv("GOOGLE_PRIVATE_KEY_ID"),
-        "private_key": os.getenv("GOOGLE_PRIVATE_KEY").replace("\\n", "\n"),
+        "private_key": os.getenv("GOOGLE_PRIVATE_KEY", "").replace("\\n", "\n"),
         "client_email": os.getenv("GOOGLE_CLIENT_EMAIL"),
         "client_id": os.getenv("GOOGLE_CLIENT_ID"),
         "auth_uri": os.getenv("GOOGLE_AUTH_URI"),
@@ -57,9 +60,13 @@ def connect_to_gsheet(spreadsheet_name, sheet_name):
         "client_x509_cert_url": os.getenv("GOOGLE_CLIENT_X509_CERT_URL")
     }
 
-    client_credentials = ServiceAccountCredentials.from_json_keyfile_dict(credentials, scope)
-    client = gspread.authorize(client_credentials)
-    return client.open(spreadsheet_name).worksheet(sheet_name)
+    try:
+        client_credentials = ServiceAccountCredentials.from_json_keyfile_dict(credentials, scope)
+        client = gspread.authorize(client_credentials)
+        return client.open(spreadsheet_name).worksheet(sheet_name)
+    except Exception as e:
+        st.error(f"❌ Google Sheets connection failed: {str(e)}")
+        return None
 
 # Cache function for loading data from Google Sheets
 @st.cache_data(ttl=300)
