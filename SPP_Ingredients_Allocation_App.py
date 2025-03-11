@@ -4,11 +4,31 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from dotenv import load_dotenv
 import os
+import time
+import plotly.express as px
+import numpy as np
+from datetime import datetime, timedelta
+
+# Configure page
+st.set_page_config(page_title="SPP Ingredients Allocation App", layout="wide")
+
+# Add custom CSS
+st.markdown("""
+<style>
+    .main-header {text-align: center; color: #FFC300; margin-bottom: 20px;}
+    .sub-header {margin-top: 15px; margin-bottom: 10px;}
+    .highlight {background-color: #f0f2f6; padding: 10px; border-radius: 5px;}
+    .footer {text-align: center; color: #888; font-size: 0.8em;}
+    .stAlert {margin-top: 20px;}
+</style>
+""", unsafe_allow_html=True)
+
+
 
 # Load environment variables
 load_dotenv()
 
-def connect_to_gsheet(spreadsheet_name, sheet_name):
+def connect_to_gsheet(creds_file, spreadsheet_name, sheet_name):
     """
     Authenticate and connect to Google Sheets.
     """
@@ -39,19 +59,32 @@ def load_data_from_google_sheet():
     """
     Load data from Google Sheets.
     """
-    SPREADSHEET_NAME = "BROWNS STOCK MANAGEMENT"
-    SHEET_NAME = "CHECK_OUT"
-
-    worksheet = connect_to_gsheet(SPREADSHEET_NAME, SHEET_NAME)
+    worksheet = connect_to_gsheet(CREDENTIALS_FILE, SPREADSHEET_NAME, SHEET_NAME)
     
     # Get all records from the Google Sheet
     data = worksheet.get_all_records()
 
     # Convert data to DataFrame
     df = pd.DataFrame(data)
+
+    # Ensure columns match the updated Google Sheets structure
+    df.columns = ["DATE", "ITEM_SERIAL", "ITEM NAME", "DEPARTMENT", "ISSUED_TO", "QUANTITY", 
+                  "UNIT_OF_MEASURE", "ITEM_CATEGORY", "WEEK", "REFERENCE", 
+                  "DEPARTMENT_CAT", "BATCH NO.", "STORE", "RECEIVED BY"]
+
+    # Convert date and numeric columns
+    df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
+    df["QUANTITY"] = pd.to_numeric(df["QUANTITY"], errors="coerce")
+    df.dropna(subset=["QUANTITY"], inplace=True)
+    
+    # Extract quarter information
+    df["QUARTER"] = df["DATE"].dt.to_period("Q")
+
+    # Filter data for 2024 onwards
+    df = df[df["DATE"].dt.year >= 2024]
+
     return df
 
-   
 @st.cache_data
 def calculate_proportion_hierarchical(df, identifier):
     """Calculate proportional usage by department and subdepartment for a specific item"""
