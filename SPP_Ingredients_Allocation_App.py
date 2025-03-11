@@ -29,11 +29,11 @@ st.markdown("""
 # Function to validate Google credentials
 def validate_google_credentials():
     required_env_vars = [
-        "GOOGLE_PROJECT_ID", "GOOGLE_PRIVATE_KEY_ID", "GOOGLE_PRIVATE_KEY",
-        "GOOGLE_CLIENT_EMAIL", "GOOGLE_CLIENT_ID", "GOOGLE_AUTH_URI", 
-        "GOOGLE_TOKEN_URI", "GOOGLE_AUTH_PROVIDER_X509_CERT_URL", "GOOGLE_CLIENT_X509_CERT_URL"
-    ]
-    
+    "GOOGLE_PROJECT_ID", "GOOGLE_PRIVATE_KEY_ID", "GOOGLE_PRIVATE_KEY",
+    "GOOGLE_CLIENT_EMAIL", "GOOGLE_CLIENT_ID", "GOOGLE_AUTH_URI", 
+    "GOOGLE_TOKEN_URI", "GOOGLE_AUTH_PROVIDER_X509_CERT_URL", "GOOGLE_CLIENT_X509_CERT_URL"
+]
+ 
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
     
     if missing_vars:
@@ -43,7 +43,7 @@ def validate_google_credentials():
     return True
 
 # Cache function for Google Sheets connection with error handling
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def load_data_from_google_sheet():
     if not validate_google_credentials():
         return pd.DataFrame()
