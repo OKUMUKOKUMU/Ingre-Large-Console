@@ -9,6 +9,17 @@ import plotly.express as px
 import numpy as np
 from datetime import datetime, timedelta
 
+import pandas as pd
+import streamlit as st
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from dotenv import load_dotenv
+import os
+import time
+import plotly.express as px
+import numpy as np
+from datetime import datetime, timedelta
+
 # Load environment variables
 load_dotenv()
 
@@ -26,111 +37,46 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Function to validate Google credentials
-def validate_google_credentials():
-    required_env_vars = [
-    "GOOGLE_PROJECT_ID", "GOOGLE_PRIVATE_KEY_ID", "GOOGLE_PRIVATE_KEY",
-    "GOOGLE_CLIENT_EMAIL", "GOOGLE_CLIENT_ID", "GOOGLE_AUTH_URI", 
-    "GOOGLE_TOKEN_URI", "GOOGLE_AUTH_PROVIDER_X509_CERT_URL", "GOOGLE_CLIENT_X509_CERT_URL"
-]
- 
-    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+# Function to connect to Google Sheets
+def connect_to_gsheet(spreadsheet_name, sheet_name):
+    scope = ["https://spreadsheets.google.com/feeds", 
+             "https://www.googleapis.com/auth/spreadsheets",
+             "https://www.googleapis.com/auth/drive.file", 
+             "https://www.googleapis.com/auth/drive"]
     
-    if missing_vars:
-        st.error(f"❌ Missing environment variables: {', '.join(missing_vars)}")
-        st.info("Please set all required environment variables for Google Sheets access.")
-        return False
-    return True
+    credentials = {
+        "type": "service_account",
+        "project_id": os.getenv("GOOGLE_PROJECT_ID"),
+        "private_key_id": os.getenv("GOOGLE_PRIVATE_KEY_ID"),
+        "private_key": os.getenv("GOOGLE_PRIVATE_KEY").replace("\\n", "\n"),
+        "client_email": os.getenv("GOOGLE_CLIENT_EMAIL"),
+        "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+        "auth_uri": os.getenv("GOOGLE_AUTH_URI"),
+        "token_uri": os.getenv("GOOGLE_TOKEN_URI"),
+        "auth_provider_x509_cert_url": os.getenv("GOOGLE_AUTH_PROVIDER_X509_CERT_URL"),
+        "client_x509_cert_url": os.getenv("GOOGLE_CLIENT_X509_CERT_URL")
+    }
 
-# Cache function for Google Sheets connection with error handling
+    client_credentials = ServiceAccountCredentials.from_json_keyfile_dict(credentials, scope)
+    client = gspread.authorize(client_credentials)
+    return client.open(spreadsheet_name).worksheet(sheet_name)
+
+# Cache function for loading data from Google Sheets
 @st.cache_data(ttl=300)
 def load_data_from_google_sheet():
-    if not validate_google_credentials():
-        return pd.DataFrame()
-        
     try:
-        scope = ["https://spreadsheets.google.com/feeds", 
-                'https://www.googleapis.com/auth/spreadsheets',
-                "https://www.googleapis.com/auth/drive.file", 
-                "https://www.googleapis.com/auth/drive"]
-        
-        credentials = {
-            "type": "service_account",
-            "project_id": os.getenv("GOOGLE_PROJECT_ID"),
-            "private_key_id": os.getenv("GOOGLE_PRIVATE_KEY_ID"),
-            "private_key": os.getenv("GOOGLE_PRIVATE_KEY").replace("\\n", "\n"),
-            "client_email": os.getenv("GOOGLE_CLIENT_EMAIL"),
-            "client_id": os.getenv("GOOGLE_CLIENT_ID"),
-            "auth_uri": os.getenv("GOOGLE_AUTH_URI"),
-            "token_uri": os.getenv("GOOGLE_TOKEN_URI"),
-            "auth_provider_x509_cert_url": os.getenv("GOOGLE_AUTH_PROVIDER_X509_CERT_URL"),
-            "client_x509_cert_url": os.getenv("GOOGLE_CLIENT_X509_CERT_URL")
-        }
-
-        client_credentials = ServiceAccountCredentials.from_json_keyfile_dict(credentials, scope)
-        client = gspread.authorize(client_credentials)
-        
-        try:
-            worksheet = client.open("BROWNS STOCK MANAGEMENT").worksheet("CHECK_OUT")
-        except gspread.exceptions.SpreadsheetNotFound:
-            st.error("❌ Spreadsheet 'BROWNS STOCK MANAGEMENT' not found!")
-            return pd.DataFrame()
-        except gspread.exceptions.WorksheetNotFound:
-            st.error("❌ Worksheet 'CHECK_OUT' not found!")
-            return pd.DataFrame()
-        
+        worksheet = connect_to_gsheet("BROWNS STOCK MANAGEMENT", "CHECK_OUT")
         data = worksheet.get_all_records()
+        
         if not data:
             st.warning("⚠️ No data found in the spreadsheet!")
             return pd.DataFrame()
             
         df = pd.DataFrame(data)
-
-        # Standardize column names and handle potential missing columns
-        expected_columns = ["DATE", "ITEM_SERIAL", "ITEM NAME", "Department", "ISSUED_TO", "QUANTITY", 
-                          "UNIT_OF_MEASURE", "ITEM_CATEGORY", "WEEK", "REFERENCE", 
-                          "DEPARTMENT_CAT", "BATCH NO.", "STORE", "RECEIVED BY"]
-        
-        # Handle column name mapping - Treat DEPARTMENT column as "Department" and ISSUED_TO as sub_department
-        if "DEPARTMENT" in df.columns and "Department" not in df.columns:
-            df = df.rename(columns={"DEPARTMENT": "Department"})
-        
-        # Check if all expected columns are present
-        missing_columns = [col for col in expected_columns if col not in df.columns]
-        if missing_columns:
-            st.warning(f"⚠️ Missing columns in spreadsheet: {', '.join(missing_columns)}")
-            # Add missing columns with NaN values
-            for col in missing_columns:
-                df[col] = np.nan
-        
-        # Ensure column order matches expected order
-        df = df[expected_columns]
-        
-        # Data cleaning and transformation
         df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
         df["QUANTITY"] = pd.to_numeric(df["QUANTITY"], errors="coerce")
-        
-        # Drop rows with missing quantities
         df.dropna(subset=["QUANTITY"], inplace=True)
         
-        # Fill missing department values
-        if df["Department"].isna().any():
-            df["Department"].fillna("Unspecified", inplace=True)
-            
-        # Fill missing department categories (old column, kept for backward compatibility)
-        if df["DEPARTMENT_CAT"].isna().any():
-            # If Department is available, use it to fill DEPARTMENT_CAT
-            df.loc[df["DEPARTMENT_CAT"].isna(), "DEPARTMENT_CAT"] = df.loc[df["DEPARTMENT_CAT"].isna(), "Department"]
-        
-        # Fill missing ISSUED_TO values
-        if df["ISSUED_TO"].isna().any():
-            df["ISSUED_TO"].fillna("Unspecified", inplace=True)
-            
-        # Add quarter and year columns for potential filtering
-        df["QUARTER"] = df["DATE"].dt.to_period("Q")
-        df["YEAR"] = df["DATE"].dt.year
-        
-        # Return all data (date filtering will be applied later)
         return df
         
     except Exception as e:
@@ -139,25 +85,17 @@ def load_data_from_google_sheet():
 
 # Function to filter data by date range
 def filter_data_by_date_range(df, start_date, end_date):
-    """Filter dataframe to include only records within the specified date range"""
     if df.empty:
         return df
-        
-    # Convert to datetime if needed
-    if not isinstance(start_date, pd.Timestamp):
-        start_date = pd.Timestamp(start_date)
-    if not isinstance(end_date, pd.Timestamp):
-        end_date = pd.Timestamp(end_date)
     
-    # Include the end_date by setting time to end of day
+    start_date = pd.Timestamp(start_date)
     end_date = pd.Timestamp(end_date.year, end_date.month, end_date.day, 23, 59, 59)
     
-    # Filter to the date range
     date_mask = (df["DATE"] >= start_date) & (df["DATE"] <= end_date)
     filtered_df = df[date_mask].copy()
     
     return filtered_df
-
+    
 @st.cache_data
 def calculate_proportion_hierarchical(df, identifier):
     """Calculate proportional usage by department and subdepartment for a specific item"""
