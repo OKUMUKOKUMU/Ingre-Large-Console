@@ -26,32 +26,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Function to connect to Google Sheets
-def connect_to_gsheet(spreadsheet_name, sheet_name):
+def connect_to_gsheet(creds_file, spreadsheet_name, sheet_name):
+    """
+    Authenticate and connect to Google Sheets.
+    """
     scope = ["https://spreadsheets.google.com/feeds", 
              "https://www.googleapis.com/auth/spreadsheets",
              "https://www.googleapis.com/auth/drive.file", 
              "https://www.googleapis.com/auth/drive"]
     
-    # Load credentials from environment variables
-    required_env_vars = [
-        "GOOGLE_PROJECT_ID", "GOOGLE_PRIVATE_KEY_ID", "GOOGLE_PRIVATE_KEY",
-        "GOOGLE_CLIENT_EMAIL", "GOOGLE_CLIENT_ID", "GOOGLE_AUTH_URI", 
-        "GOOGLE_TOKEN_URI", "GOOGLE_AUTH_PROVIDER_X509_CERT_URL", "GOOGLE_CLIENT_X509_CERT_URL"
-    ]
-    
-    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-    
-    if missing_vars:
-        st.error(f"❌ Missing environment variables: {', '.join(missing_vars)}")
-        return None
-    
-    # Construct credentials dictionary safely
     credentials = {
         "type": "service_account",
         "project_id": os.getenv("GOOGLE_PROJECT_ID"),
         "private_key_id": os.getenv("GOOGLE_PRIVATE_KEY_ID"),
-        "private_key": os.getenv("GOOGLE_PRIVATE_KEY", "").replace("\\n", "\n"),
+        "private_key": os.getenv("GOOGLE_PRIVATE_KEY").replace("\\n", "\n"),
         "client_email": os.getenv("GOOGLE_CLIENT_EMAIL"),
         "client_id": os.getenv("GOOGLE_CLIENT_ID"),
         "auth_uri": os.getenv("GOOGLE_AUTH_URI"),
@@ -60,41 +48,41 @@ def connect_to_gsheet(spreadsheet_name, sheet_name):
         "client_x509_cert_url": os.getenv("GOOGLE_CLIENT_X509_CERT_URL")
     }
 
-    try:
-        client_credentials = ServiceAccountCredentials.from_json_keyfile_dict(credentials, scope)
-        client = gspread.authorize(client_credentials)
-        return client.open(spreadsheet_name).worksheet(sheet_name)
-    except Exception as e:
-        st.error(f"❌ Google Sheets connection failed: {str(e)}")
-        return None
+    client_credentials = ServiceAccountCredentials.from_json_keyfile_dict(credentials, scope)
+    client = gspread.authorize(client_credentials)
+    spreadsheet = client.open(spreadsheet_name)  
+    return spreadsheet.worksheet(sheet_name)  # Access specific sheet by name
 
-# Cache function for loading data from Google Sheets
-@st.cache_data(ttl=300)
 def load_data_from_google_sheet():
-    try:
-        worksheet = connect_to_gsheet("BROWNS STOCK MANAGEMENT", "CHECK_OUT")
-        data = worksheet.get_all_records()
-        
-        if not data:
-            st.warning("⚠️ No data found in the spreadsheet!")
-            return pd.DataFrame()
-            
-        df = pd.DataFrame(data)
-        df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
-        df["QUANTITY"] = pd.to_numeric(df["QUANTITY"], errors="coerce")
-        df.dropna(subset=["QUANTITY"], inplace=True)
-        
-        return df
-        
-    except Exception as e:
-        st.error(f"❌ Error loading data: {str(e)}")
-        return pd.DataFrame()
-
-# Function to filter data by date range
-def filter_data_by_date_range(df, start_date, end_date):
-    if df.empty:
-        return df
+    """
+    Load data from Google Sheets.
+    """
+    worksheet = connect_to_gsheet(CREDENTIALS_FILE, SPREADSHEET_NAME, SHEET_NAME)
     
+    # Get all records from the Google Sheet
+    data = worksheet.get_all_records()
+
+    # Convert data to DataFrame
+    df = pd.DataFrame(data)
+
+    # Ensure columns match the updated Google Sheets structure
+    df.columns = ["DATE", "ITEM_SERIAL", "ITEM NAME", "DEPARTMENT", "ISSUED_TO", "QUANTITY", 
+                  "UNIT_OF_MEASURE", "ITEM_CATEGORY", "WEEK", "REFERENCE", 
+                  "DEPARTMENT_CAT", "BATCH NO.", "STORE", "RECEIVED BY"]
+
+    # Convert date and numeric columns
+    df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
+    df["QUANTITY"] = pd.to_numeric(df["QUANTITY"], errors="coerce")
+    df.dropna(subset=["QUANTITY"], inplace=True)
+    
+    # Extract quarter information
+    df["QUARTER"] = df["DATE"].dt.to_period("Q")
+
+    # Filter data for 2024 onwards
+    df = df[df["DATE"].dt.year >= 2024]
+
+    return df
+
     start_date = pd.Timestamp(start_date)
     end_date = pd.Timestamp(end_date.year, end_date.month, end_date.day, 23, 59, 59)
     
