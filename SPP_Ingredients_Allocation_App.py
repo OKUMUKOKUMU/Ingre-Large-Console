@@ -8,6 +8,18 @@ import time
 import plotly.express as px
 import numpy as np
 from datetime import datetime, timedelta
+import streamlit as st
+import gspread
+import pandas as pd
+from oauth2client.service_account import ServiceAccountCredentials
+import os
+import gspread
+import pandas as pd
+import streamlit as st
+from oauth2client.service_account import ServiceAccountCredentials
+
+# Load environment variables
+load_dotenv()
 
 # Configure page
 st.set_page_config(page_title="SPP Ingredients Allocation App", layout="wide")
@@ -25,52 +37,55 @@ st.markdown("""
 
 
 
-# Load environment variables
-load_dotenv()
-
-def connect_to_gsheet(creds_file, spreadsheet_name, sheet_name):
+def connect_to_gsheet(spreadsheet_name, sheet_name):
     """
-    Authenticate and connect to Google Sheets.
+    Authenticate and connect to Google Sheets using credentials from Streamlit secrets.
     """
     scope = ["https://spreadsheets.google.com/feeds", 
              "https://www.googleapis.com/auth/spreadsheets",
              "https://www.googleapis.com/auth/drive.file", 
              "https://www.googleapis.com/auth/drive"]
-    
-    credentials = {
-        "type": "service_account",
-        "project_id": os.getenv("GOOGLE_PROJECT_ID"),
-        "private_key_id": os.getenv("GOOGLE_PRIVATE_KEY_ID"),
-        "private_key": os.getenv("GOOGLE_PRIVATE_KEY").replace("\\n", "\n"),
-        "client_email": os.getenv("GOOGLE_CLIENT_EMAIL"),
-        "client_id": os.getenv("GOOGLE_CLIENT_ID"),
-        "auth_uri": os.getenv("GOOGLE_AUTH_URI"),
-        "token_uri": os.getenv("GOOGLE_TOKEN_URI"),
-        "auth_provider_x509_cert_url": os.getenv("GOOGLE_AUTH_PROVIDER_X509_CERT_URL"),
-        "client_x509_cert_url": os.getenv("GOOGLE_CLIENT_X509_CERT_URL")
-    }
 
-    client_credentials = ServiceAccountCredentials.from_json_keyfile_dict(credentials, scope)
-    client = gspread.authorize(client_credentials)
-    spreadsheet = client.open(spreadsheet_name)  
-    return spreadsheet.worksheet(sheet_name)  # Access specific sheet by name
+    # Load credentials from Streamlit secrets
+    credentials = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
+
+    client = gspread.authorize(credentials)
+    
+    try:
+        spreadsheet = client.open(spreadsheet_name)
+        return spreadsheet.worksheet(sheet_name)  # Access specific sheet
+    except gspread.exceptions.SpreadsheetNotFound:
+        st.error(f"❌ Spreadsheet '{spreadsheet_name}' not found!")
+        return None
+    except gspread.exceptions.WorksheetNotFound:
+        st.error(f"❌ Worksheet '{sheet_name}' not found!")
+        return None
 
 def load_data_from_google_sheet():
     """
     Load data from Google Sheets.
     """
-    worksheet = connect_to_gsheet(CREDENTIALS_FILE, SPREADSHEET_NAME, SHEET_NAME)
+    worksheet = connect_to_gsheet("BROWNS STOCK MANAGEMENT", "CHECK_OUT")
     
+    if worksheet is None:
+        return pd.DataFrame()
+
     # Get all records from the Google Sheet
     data = worksheet.get_all_records()
+
+    if not data:
+        st.warning("⚠️ No data found in the spreadsheet!")
+        return pd.DataFrame()
 
     # Convert data to DataFrame
     df = pd.DataFrame(data)
 
-    # Ensure columns match the updated Google Sheets structure
-    df.columns = ["DATE", "ITEM_SERIAL", "ITEM NAME", "DEPARTMENT", "ISSUED_TO", "QUANTITY", 
-                  "UNIT_OF_MEASURE", "ITEM_CATEGORY", "WEEK", "REFERENCE", 
-                  "DEPARTMENT_CAT", "BATCH NO.", "STORE", "RECEIVED BY"]
+    # Ensure columns match the expected structure
+    expected_columns = ["DATE", "ITEM_SERIAL", "ITEM NAME", "DEPARTMENT", "ISSUED_TO", "QUANTITY", 
+                        "UNIT_OF_MEASURE", "ITEM_CATEGORY", "WEEK", "REFERENCE", 
+                        "DEPARTMENT_CAT", "BATCH NO.", "STORE", "RECEIVED BY"]
+    
+    df.columns = expected_columns[:len(df.columns)]  # Adjust if column count is different
 
     # Convert date and numeric columns
     df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
@@ -101,7 +116,7 @@ def calculate_proportion_hierarchical(df, identifier):
         return None
 
     # Group by department and subdepartment and calculate total quantity
-    usage_summary = filtered_df.groupby(["Department", "ISSUED_TO"])["QUANTITY"].sum()
+    usage_summary = filtered_df.groupby(["DEPARTMENT", "ISSUED_TO"])["QUANTITY"].sum()
     
     # Calculate proportions
     total_usage = usage_summary.sum()
@@ -114,12 +129,13 @@ def calculate_proportion_hierarchical(df, identifier):
     result = proportions.reset_index()
     
     # Sort by department and proportion (descending)
-    result = result.sort_values(by=["Department", "QUANTITY"], ascending=[True, False])
+    result = result.sort_values(by=["DEPARTMENT", "QUANTITY"], ascending=[True, False])
     
     # Ensure no null values
     result = result.fillna(0)
     
     return result
+
 
 def allocate_quantity_hierarchical(df, item_quantities, min_threshold=5):
     """Allocate quantities to departments and subdepartments based on historical usage patterns"""
