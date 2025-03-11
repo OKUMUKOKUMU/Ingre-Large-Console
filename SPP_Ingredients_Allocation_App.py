@@ -50,6 +50,7 @@ def load_data_from_google_sheet():
     # Convert data to DataFrame
     df = pd.DataFrame(data)
     return df
+
    
 @st.cache_data
 def calculate_proportion_hierarchical(df, identifier):
