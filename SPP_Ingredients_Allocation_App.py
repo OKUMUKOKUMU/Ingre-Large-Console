@@ -430,4 +430,32 @@ elif view_mode == "Data Overview":
     st.markdown("</div>", unsafe_allow_html=True)
     
     # Simple statistics
-    st.markdown("<div class='card'>", unsafe_
+    # Simple statistics
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("#### Usage Statistics")
+    total_usage = filtered_data["QUANTITY"].sum()
+    unique_items_count = filtered_data["ITEM NAME"].nunique()
+    
+    stat_col1, stat_col2, stat_col3 = st.columns(3)
+    with stat_col1:
+        st.metric("Total Quantity Used", f"{total_usage:,.2f}")
+    with stat_col2:
+        st.metric("Unique Items", f"{unique_items_count}")
+    with stat_col3:
+        st.metric("Total Transactions", f"{len(filtered_data):,}")
+    
+    # Usage by department visualization
+    if not filtered_data.empty:
+        st.markdown("#### Department Usage")
+        dept_usage = filtered_data.groupby("DEPARTMENT")["QUANTITY"].sum().reset_index()
+        dept_usage.sort_values(by="QUANTITY", ascending=False, inplace=True)
+        
+        fig = px.pie(
+            dept_usage, 
+            values="QUANTITY", 
+            names="DEPARTMENT", 
+            title="Usage Distribution by Department",
+            hole=0.4
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
