@@ -90,6 +90,7 @@ def get_cached_data():
 def calculate_proportion(df, identifier, department=None):
     """
     Calculate department-wise usage proportion but keep subdepartment details.
+    Ensures all departments sum to 100%.
     """
     if df is None:
         return None
@@ -109,27 +110,33 @@ def calculate_proportion(df, identifier, department=None):
             if filtered_df.empty:
                 return None
 
-        # First group by DEPARTMENT only to calculate proportions at department level
-        dept_usage = filtered_df.groupby("DEPARTMENT")["QUANTITY"].sum().reset_index()
-        total_usage = dept_usage["QUANTITY"].sum()
+        # Calculate the total quantity across ALL departments
+        total_usage = filtered_df["QUANTITY"].sum()
         
         if total_usage == 0:
             return None
-            
+        
+        # First group by DEPARTMENT only to calculate proportions at department level
+        dept_usage = filtered_df.groupby("DEPARTMENT")["QUANTITY"].sum().reset_index()
+        
+        # Calculate each department's proportion of the TOTAL usage across all departments
         dept_usage["PROPORTION"] = (dept_usage["QUANTITY"] / total_usage) * 100
+        
+        # Verify proportions sum to 100%
+        if abs(dept_usage["PROPORTION"].sum() - 100) > 0.01:  # Allow small rounding error
+            # Normalize if needed
+            dept_usage["PROPORTION"] = (dept_usage["PROPORTION"] / dept_usage["PROPORTION"].sum()) * 100
         
         # Create a dictionary of department proportions for reference
         dept_proportions = dict(zip(dept_usage["DEPARTMENT"], dept_usage["PROPORTION"]))
         
         # Now create detailed DataFrame with subdepartment info
-        # Keep DEPARTMENT, subdepartment columns, and sum quantities
         detailed_usage = filtered_df.groupby(["DEPARTMENT", "DEPARTMENT_CAT", "ISSUED_TO"])["QUANTITY"].sum().reset_index()
         
         # Assign the department-level proportion to each row
         detailed_usage["PROPORTION"] = detailed_usage["DEPARTMENT"].map(dept_proportions)
         
         # Calculate relative quantity within each department (for sorting purposes)
-        # Ensure we're using absolute values for QUANTITY to avoid negative weights
         detailed_usage["QUANTITY_ABS"] = detailed_usage["QUANTITY"].abs()
         dept_totals = detailed_usage.groupby("DEPARTMENT")["QUANTITY_ABS"].transform('sum')
         detailed_usage["INTERNAL_WEIGHT"] = detailed_usage["QUANTITY_ABS"] / dept_totals
@@ -150,24 +157,18 @@ def allocate_quantity(df, identifier, available_quantity, department=None):
     if proportions is None:
         return None
 
-    # Calculate allocated quantity based on the department proportion
-    # Use the absolute value of the proportion to ensure positive allocation
-    proportions["PROPORTION_ABS"] = proportions["PROPORTION"].abs()
+    # We already have correct department proportions that sum to 100%
+    # No need for additional normalization of department-level proportions
     
-    # Normalize proportions to ensure they sum to 100%
-    total_proportion = proportions["PROPORTION_ABS"].sum()
-    if total_proportion > 0:  # Prevent division by zero
-        proportions["PROPORTION_ABS"] = (proportions["PROPORTION_ABS"] / total_proportion) * 100
+    # Calculate allocated quantity for each department based on their proportion
+    proportions["ALLOCATED_QUANTITY"] = (proportions["PROPORTION"] / 100) * available_quantity
     
-    # Calculate allocation based on normalized proportions
-    proportions["ALLOCATED_QUANTITY"] = (proportions["PROPORTION_ABS"] / 100) * available_quantity
-    
-    # Calculate allocated quantity for each department
+    # Group by department to get department-level allocations
     dept_allocation = proportions.groupby("DEPARTMENT")["ALLOCATED_QUANTITY"].sum().reset_index()
     
-    # Adjust to ensure the sum matches the input quantity exactly
+    # Adjust to ensure the sum matches the available quantity exactly
     allocated_sum = dept_allocation["ALLOCATED_QUANTITY"].sum()
-    if allocated_sum != available_quantity and len(dept_allocation) > 0:
+    if abs(allocated_sum - available_quantity) > 0.01 and len(dept_allocation) > 0:  # Allow small rounding error
         difference = available_quantity - allocated_sum
         index_max = dept_allocation["ALLOCATED_QUANTITY"].idxmax()
         dept_allocation.at[index_max, "ALLOCATED_QUANTITY"] += difference
@@ -182,10 +183,9 @@ def allocate_quantity(df, identifier, available_quantity, department=None):
             dept_total = adjusted_dept_allocations[dept]
             
             # Distribute the department allocation based on internal weights
-            # Ensure we're using positive weights
             group_copy = group.copy()
             
-            # Normalize internal weights to sum to 1 within each department
+            # Normalize internal weights within each department
             group_internal_weights_sum = group_copy["INTERNAL_WEIGHT"].sum()
             if group_internal_weights_sum > 0:  # Prevent division by zero
                 group_copy["INTERNAL_WEIGHT_NORM"] = group_copy["INTERNAL_WEIGHT"] / group_internal_weights_sum
@@ -202,11 +202,16 @@ def allocate_quantity(df, identifier, available_quantity, department=None):
     # Combine all department results
     final_result = pd.concat(result_dfs)
     
-    # Ensure all allocated quantities are non-negative
-    final_result["ALLOCATED_QUANTITY"] = final_result["ALLOCATED_QUANTITY"].abs()
-    
     # Round allocated quantities
     final_result["ALLOCATED_QUANTITY"] = final_result["ALLOCATED_QUANTITY"].round(0)
+    
+    # Final check to ensure total allocation matches available quantity (accounting for rounding)
+    final_total = final_result["ALLOCATED_QUANTITY"].sum()
+    if abs(final_total - available_quantity) > 1:  # Allow for rounding differences
+        difference = available_quantity - final_total
+        # Add/subtract the difference from the largest allocation
+        index_max = final_result["ALLOCATED_QUANTITY"].idxmax()
+        final_result.at[index_max, "ALLOCATED_QUANTITY"] += difference
     
     return final_result
 
