@@ -209,21 +209,22 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Custom CSS for improved appearance
 st.markdown("""
     <style>
     .title {
         text-align: center;
-        font-size: 32px;
+        font-size: 36px;
         font-weight: bold;
-        color: #FFC300;
-        font-family: 'Amasis MT Pro', Arial, sans-serif;
-        margin-bottom: 5px;
+        color: #2E86C1;
+        font-family: 'Arial', sans-serif;
+        margin-bottom: 10px;
     }
     .subtitle {
         text-align: center;
-        font-size: 16px;
+        font-size: 18px;
         color: #6c757d;
-        margin-bottom: 20px;
+        margin-bottom: 30px;
     }
     .footer {
         text-align: center;
@@ -232,28 +233,41 @@ st.markdown("""
         margin-top: 30px;
     }
     .stButton button {
-        background-color: #FFC300;
+        background-color: #2E86C1;
         color: white;
         font-weight: bold;
+        border-radius: 5px;
+        padding: 10px 20px;
     }
     .stButton button:hover {
-        background-color: #E6B000;
-    }
-    .result-header {
-        background-color: #f8f9fa;
-        padding: 8px;
-        border-radius: 5px;
-        margin-bottom: 8px;
+        background-color: #1C6EA4;
     }
     .card {
         background-color: #ffffff;
         border-radius: 10px;
-        padding: 15px;
+        padding: 20px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+    }
+    .filter-header {
+        font-size: 20px;
+        font-weight: bold;
+        color: #2E86C1;
+        margin-bottom: 10px;
+    }
+    .stDataFrame {
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .stSelectbox, .stNumberInput, .stMultiselect {
         margin-bottom: 15px;
     }
     </style>
 """, unsafe_allow_html=True)
+
+# Main title and subtitle
+st.markdown("<h1 class='title'>SPP Ingredients Allocation App</h1>", unsafe_allow_html=True)
+st.markdown("<p class='subtitle'>Efficiently allocate ingredients based on historical usage</p>", unsafe_allow_html=True)
 
 # Sidebar
 with st.sidebar:
@@ -274,8 +288,9 @@ with st.sidebar:
         st.error("Failed to load data from Google Sheets. Please check your connection and credentials.")
         st.stop()
     
-    # Extract unique item names and departments for auto-suggestions
+    # Extract unique item names, categories, and departments for filtering
     unique_item_names = sorted(data["ITEM NAME"].unique().tolist())
+    unique_categories = sorted(data["ITEM_CATEGORY"].unique().tolist())
     unique_departments = sorted(["All Departments"] + data["DEPARTMENT"].unique().tolist())
     
     st.markdown("### Quick Stats")
@@ -295,8 +310,6 @@ with st.sidebar:
     st.markdown("<p class='footer'>Developed by Brown's Data Team, ©2025</p>", unsafe_allow_html=True)
 
 # Main content
-st.markdown("<h1 class='title'>SPP Ingredients Allocation App</h1>", unsafe_allow_html=True)
-
 if view_mode == "Allocation Calculator":
     # Form Layout for Better UX
     st.markdown("<div class='card'>", unsafe_allow_html=True)
@@ -335,7 +348,6 @@ if view_mode == "Allocation Calculator":
                     st.markdown(f"<div class='result-header'><h3 style='color: #2E86C1;'>Allocation for {identifier}</h3></div>", unsafe_allow_html=True)
                     
                     # Format the output for better readability
-                    # Select and rename columns for display
                     formatted_result = result[["DEPARTMENT", "PROPORTION", "ALLOCATED_QUANTITY"]].copy()
                     formatted_result = formatted_result.rename(columns={
                         "DEPARTMENT": "Department",
@@ -379,15 +391,33 @@ elif view_mode == "Data Overview":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.markdown("### Data Overview")
     
-    # Filter options
-    col1, col2 = st.columns(2)
-    with col1:
-        selected_items = st.multiselect("Filter by Items", unique_item_names, default=[])
-    with col2:
-        selected_overview_dept = st.multiselect("Filter by Departments", unique_departments[1:], default=[])  # Exclude "All Departments"
+    # Advanced Filters
+    with st.expander("🔍 Advanced Filters", expanded=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            # Date range filter
+            min_date = data["DATE"].min().date()
+            max_date = data["DATE"].max().date()
+            date_range = st.date_input("Select Date Range", [min_date, max_date])
+        with col2:
+            # Multi-select for item categories
+            selected_categories = st.multiselect("Filter by Item Categories", unique_categories, default=[])
+        
+        col3, col4 = st.columns(2)
+        with col3:
+            # Multi-select for items
+            selected_items = st.multiselect("Filter by Items", unique_item_names, default=[])
+        with col4:
+            # Multi-select for departments
+            selected_overview_dept = st.multiselect("Filter by Departments", unique_departments[1:], default=[])  # Exclude "All Departments"
     
     # Apply filters
     filtered_data = data.copy()
+    if date_range:
+        filtered_data = filtered_data[(filtered_data["DATE"].dt.date >= date_range[0]) & 
+                                     (filtered_data["DATE"].dt.date <= date_range[1])]
+    if selected_categories:
+        filtered_data = filtered_data[filtered_data["ITEM_CATEGORY"].isin(selected_categories)]
     if selected_items:
         filtered_data = filtered_data[filtered_data["ITEM NAME"].isin(selected_items)]
     if selected_overview_dept:
@@ -395,36 +425,9 @@ elif view_mode == "Data Overview":
     
     # Show data overview
     st.markdown("#### Filtered Data Preview")
-    display_columns = ["DATE", "ITEM NAME", "DEPARTMENT", "QUANTITY", "UNIT_OF_MEASURE"]
+    display_columns = ["DATE", "ITEM NAME", "DEPARTMENT", "QUANTITY", "UNIT_OF_MEASURE", "ITEM_CATEGORY"]
     st.dataframe(filtered_data[display_columns].head(100), use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
     
     # Simple statistics
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("#### Usage Statistics")
-    total_usage = filtered_data["QUANTITY"].sum()
-    unique_items_count = filtered_data["ITEM NAME"].nunique()
-    
-    stat_col1, stat_col2, stat_col3 = st.columns(3)
-    with stat_col1:
-        st.metric("Total Quantity Used", f"{total_usage:,.2f}")
-    with stat_col2:
-        st.metric("Unique Items", f"{unique_items_count}")
-    with stat_col3:
-        st.metric("Total Transactions", f"{len(filtered_data):,}")
-    
-    # Usage by department visualization
-    if not filtered_data.empty:
-        st.markdown("#### Department Usage")
-        dept_usage = filtered_data.groupby("DEPARTMENT")["QUANTITY"].sum().reset_index()
-        dept_usage.sort_values(by="QUANTITY", ascending=False, inplace=True)
-        
-        fig = px.pie(
-            dept_usage, 
-            values="QUANTITY", 
-            names="DEPARTMENT", 
-            title="Usage Distribution by Department",
-            hole=0.4
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'>", unsafe_
